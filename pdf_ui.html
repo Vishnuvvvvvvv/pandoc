@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>PDF Parser — Test UI</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--surface2:#21262d;
+  --border:#30363d;--accent:#2f81f7;--accent2:#58a6ff;
+  --green:#3fb950;--red:#f85149;--yellow:#d29922;
+  --text:#e6edf3;--muted:#8b949e;
+  --radius:10px;--font:'Inter',system-ui,sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh;padding:24px}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+h1{font-size:1.6rem;font-weight:700;background:linear-gradient(90deg,var(--accent2),#a371f7);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:4px}
+.sub{color:var(--muted);font-size:.85rem;margin-bottom:28px}
+
+.layout{display:grid;grid-template-columns:380px 1fr;gap:20px;max-width:1400px;margin:0 auto}
+
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px}
+.card h2{font-size:.95rem;font-weight:600;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.08em;margin-bottom:16px}
+
+/* Drop zone */
+.drop-zone{border:2px dashed var(--border);border-radius:var(--radius);padding:36px 20px;
+  text-align:center;cursor:pointer;transition:.2s;margin-bottom:16px}
+.drop-zone:hover,.drop-zone.drag{border-color:var(--accent);background:rgba(47,129,247,.06)}
+.drop-zone svg{width:40px;height:40px;stroke:var(--muted);margin-bottom:10px}
+.drop-zone p{color:var(--muted);font-size:.88rem}
+.drop-zone strong{color:var(--text)}
+#fileInput{display:none}
+
+/* Settings */
+.setting{display:flex;align-items:center;justify-content:space-between;
+  padding:10px 0;border-bottom:1px solid var(--border)}
+.setting:last-child{border:none}
+.setting label{font-size:.88rem;color:var(--muted)}
+.toggle{width:40px;height:22px;background:var(--border);border-radius:11px;
+  cursor:pointer;position:relative;transition:.25s}
+.toggle.on{background:var(--accent)}
+.toggle::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;
+  background:#fff;border-radius:50%;transition:.25s}
+.toggle.on::after{left:21px}
+
+/* Button */
+.btn{width:100%;padding:11px;border:none;border-radius:8px;font-size:.9rem;font-weight:600;
+  cursor:pointer;transition:.2s;background:var(--accent);color:#fff}
+.btn:hover{background:var(--accent2)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* Status badge */
+.badge{display:inline-block;padding:3px 10px;border-radius:99px;font-size:.78rem;font-weight:600}
+.badge.queued{background:rgba(210,153,34,.15);color:var(--yellow)}
+.badge.processing{background:rgba(47,129,247,.15);color:var(--accent2)}
+.badge.done{background:rgba(63,185,80,.15);color:var(--green)}
+.badge.error{background:rgba(248,81,73,.15);color:var(--red)}
+
+/* Jobs list */
+.job-item{padding:12px;border-radius:8px;background:var(--surface2);
+  border:1px solid var(--border);margin-bottom:8px;cursor:pointer;transition:.2s}
+.job-item:hover{border-color:var(--accent)}
+.job-item.active{border-color:var(--accent);background:rgba(47,129,247,.08)}
+.job-name{font-size:.88rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.job-meta{font-size:.76rem;color:var(--muted);margin-top:3px}
+
+/* Result panel */
+.tabs{display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:12px}
+.tab{padding:6px 14px;border-radius:6px;font-size:.83rem;font-weight:500;cursor:pointer;color:var(--muted);border:none;background:none}
+.tab.active{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
+
+.stat-row{display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.stat{background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+  padding:10px 16px;flex:1;min-width:100px;text-align:center}
+.stat .val{font-size:1.5rem;font-weight:700;color:var(--accent2)}
+.stat .lbl{font-size:.75rem;color:var(--muted);margin-top:2px}
+
+pre{background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+  padding:16px;overflow:auto;font-size:.8rem;line-height:1.6;max-height:520px;
+  white-space:pre-wrap;word-break:break-word}
+
+.dl-row{display:flex;gap:8px;margin-top:12px}
+.dl-btn{flex:1;padding:8px;border-radius:6px;border:1px solid var(--border);
+  background:var(--surface2);color:var(--text);font-size:.82rem;cursor:pointer;text-align:center;text-decoration:none;transition:.2s}
+.dl-btn:hover{border-color:var(--accent);color:var(--accent2)}
+
+.empty{color:var(--muted);font-size:.88rem;text-align:center;padding:40px 0}
+.pulse{animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+</style>
+</head>
+<body>
+<div style="max-width:1400px;margin:0 auto">
+  <h1>⚡ PDF Extraction Pipeline</h1>
+  <p class="sub">Powered by pdfplumber · Amazon Textract · AWS Bedrock</p>
+  <div class="layout">
+
+    <!-- Left panel -->
+    <div>
+      <div class="card" style="margin-bottom:16px">
+        <h2>Upload PDF</h2>
+        <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+          <svg fill="none" viewBox="0 0 24 24" stroke-width="1.4"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+          <p><strong>Click or drag</strong> a PDF here</p>
+          <p id="fileName" style="margin-top:6px;color:var(--accent2)"></p>
+        </div>
+        <input type="file" id="fileInput" accept=".pdf">
+
+        <div class="card" style="background:var(--surface2);padding:14px;margin-bottom:14px">
+          <h2>Options</h2>
+          <div class="setting">
+            <label>Use Textract (OCR scanned pages)</label>
+            <div class="toggle" id="toggleTextract" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="setting">
+            <label>Use VLM chart analysis</label>
+            <div class="toggle" id="toggleVlm" onclick="this.classList.toggle('on')"></div>
+          </div>
+        </div>
+
+        <button class="btn" id="uploadBtn" onclick="uploadPdf()">Upload &amp; Extract</button>
+      </div>
+
+      <div class="card">
+        <h2>Jobs <span id="jobCount" style="color:var(--accent2);font-size:.85rem"></span></h2>
+        <div id="jobsList"><p class="empty">No jobs yet</p></div>
+      </div>
+    </div>
+
+    <!-- Right panel -->
+    <div class="card">
+      <div id="emptyState" class="empty" style="padding:80px 0">
+        <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="var(--muted)" stroke-width="1.2"><path stroke-linecap="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25"/></svg>
+        <p style="margin-top:10px">Upload a PDF to see extraction results</p>
+      </div>
+      <div id="resultPanel" style="display:none">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <h2 id="resTitle" style="color:var(--text);font-size:1rem;text-transform:none;letter-spacing:0"></h2>
+          <span id="resBadge" class="badge"></span>
+        </div>
+        <div class="stat-row" id="statRow"></div>
+        <div class="tabs">
+          <button class="tab active" onclick="showTab('markdown',this)">Markdown</button>
+          <button class="tab" onclick="showTab('json',this)">Semantic JSON</button>
+          <button class="tab" onclick="showTab('pages',this)">Pages</button>
+        </div>
+        <div id="tabMarkdown"><pre id="mdContent"></pre></div>
+        <div id="tabJson" style="display:none"><pre id="jsonContent"></pre></div>
+        <div id="tabPages" style="display:none"><pre id="pagesContent"></pre></div>
+        <div class="dl-row">
+          <a id="dlMarkdown" class="dl-btn" href="#" onclick="return false">⬇ Markdown</a>
+          <a id="dlSemantic" class="dl-btn" href="#" onclick="return false">⬇ Semantic JSON</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE = '/pdf';
+let activeJob = null;
+let pollTimer = null;
+
+// Drag-and-drop
+const dz = document.getElementById('dropZone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (f && f.name.endsWith('.pdf')) {
+    document.getElementById('fileInput').files;
+    document.getElementById('fileName').textContent = f.name;
+    window._droppedFile = f;
+  }
+});
+document.getElementById('fileInput').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (f) { document.getElementById('fileName').textContent = f.name; window._droppedFile = f; }
+});
+
+async function uploadPdf() {
+  const f = window._droppedFile || document.getElementById('fileInput').files[0];
+  if (!f) { alert('Please select a PDF first.'); return; }
+  const btn = document.getElementById('uploadBtn');
+  btn.disabled = true; btn.textContent = 'Uploading…';
+  const fd = new FormData();
+  fd.append('file', f);
+  try {
+    const r = await fetch(`${BASE}/upload`, { method: 'POST', body: fd });
+    const data = await r.json();
+    if (!r.ok) { alert(data.detail || 'Upload failed'); return; }
+    btn.textContent = 'Upload & Extract';
+    btn.disabled = false;
+    window._droppedFile = null;
+    document.getElementById('fileName').textContent = '';
+    loadJobs();
+    selectJob(data.job_id);
+  } catch(e) { alert('Network error: ' + e); btn.disabled = false; btn.textContent = 'Upload & Extract'; }
+}
+
+async function loadJobs() {
+  const r = await fetch(`${BASE}/jobs`);
+  const jobs = await r.json();
+  const el = document.getElementById('jobsList');
+  document.getElementById('jobCount').textContent = `(${jobs.length})`;
+  if (!jobs.length) { el.innerHTML = '<p class="empty">No jobs yet</p>'; return; }
+  el.innerHTML = jobs.reverse().map(j => `
+    <div class="job-item ${j.job_id === activeJob ? 'active' : ''}" onclick="selectJob('${j.job_id}')">
+      <div class="job-name">${j.filename || j.job_id}</div>
+      <div class="job-meta">
+        <span class="badge ${j.status}">${j.status}</span>
+        ${j.pages ? `· ${j.pages} pages` : ''}
+      </div>
+    </div>`).join('');
+}
+
+async function selectJob(jobId) {
+  activeJob = jobId;
+  loadJobs();
+  clearInterval(pollTimer);
+  await fetchStatus(jobId);
+  pollTimer = setInterval(() => fetchStatus(jobId), 2000);
+}
+
+async function fetchStatus(jobId) {
+  const r = await fetch(`${BASE}/status/${jobId}`);
+  const d = await r.json();
+  renderResult(d);
+  if (d.status === 'done' || d.status === 'error') {
+    clearInterval(pollTimer);
+    loadJobs();
+  }
+}
+
+function renderResult(d) {
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('resultPanel').style.display = 'block';
+  document.getElementById('resTitle').textContent = d.document || d.job_id;
+  const badge = document.getElementById('resBadge');
+  badge.className = `badge ${d.status}`;
+  badge.textContent = d.status;
+  if (d.status === 'processing' || d.status === 'queued') badge.classList.add('pulse');
+
+  // Stats
+  document.getElementById('statRow').innerHTML = `
+    <div class="stat"><div class="val">${d.total_pages ?? '—'}</div><div class="lbl">Pages</div></div>
+    <div class="stat"><div class="val">${d.tables_total ?? '—'}</div><div class="lbl">Tables</div></div>
+    <div class="stat"><div class="val">${d.images_total ?? '—'}</div><div class="lbl">Images</div></div>
+    <div class="stat"><div class="val" style="font-size:1rem">${d.status}</div><div class="lbl">Status</div></div>`;
+
+  document.getElementById('mdContent').textContent = d.markdown_preview || (d.status === 'done' ? '(empty)' : 'Processing…');
+  document.getElementById('jsonContent').textContent = d.semantic_json_path
+    ? `Path: ${d.semantic_json_path}\n\n(Download below to view full JSON)` : 'Not available yet';
+  if (d.error) document.getElementById('mdContent').textContent = '❌ Error: ' + d.error;
+
+  // Downloads
+  document.getElementById('dlMarkdown').onclick = () => { window.location = `${BASE}/download/${d.job_id}/markdown`; return false; };
+  document.getElementById('dlSemantic').onclick = () => { window.location = `${BASE}/download/${d.job_id}/semantic`; return false; };
+}
+
+function showTab(tab, btn) {
+  ['Markdown','Json','Pages'].forEach(t => {
+    document.getElementById('tab'+t).style.display = 'none';
+  });
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1)).style.display = '';
+  btn.classList.add('active');
+}
+
+// Initial load
+loadJobs();
+setInterval(loadJobs, 5000);
+</script>
+</body>
+</html>

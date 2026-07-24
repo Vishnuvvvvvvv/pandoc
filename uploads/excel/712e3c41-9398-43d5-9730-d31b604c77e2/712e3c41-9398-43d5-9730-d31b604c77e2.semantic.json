@@ -1,0 +1,67 @@
+{
+  "document": "712e3c41-9398-43d5-9730-d31b604c77e2.xlsx",
+  "schema_version": "1.0",
+  "total_sheets": 2,
+  "total_tables": 2,
+  "sheets": [
+    {
+      "name": "Sheet1",
+      "rows": 3,
+      "cols": 7,
+      "empty": false,
+      "meta": {
+        "max_row": 3,
+        "max_col": 7,
+        "has_merged_cells": false
+      },
+      "data": [
+        [
+          "Text",
+          "Date",
+          "Number",
+          "Currency",
+          "Time",
+          "Percentage",
+          "Forumula"
+        ],
+        [
+          "Row 1",
+          "2017-01-01 00:00:00",
+          "100",
+          "100",
+          "11:00:00",
+          "0.1",
+          "10"
+        ],
+        [
+          "Row 2",
+          "2017-01-02 00:00:00",
+          "200",
+          "200",
+          "12:00:00",
+          "0.2",
+          "40"
+        ]
+      ]
+    },
+    {
+      "name": "Additional Sheet",
+      "rows": 2,
+      "cols": 1,
+      "empty": false,
+      "meta": {
+        "max_row": 2,
+        "max_col": 1,
+        "has_merged_cells": false
+      },
+      "data": [
+        [
+          "Text"
+        ],
+        [
+          "This is the second sheet"
+        ]
+      ]
+    }
+  ]
+}

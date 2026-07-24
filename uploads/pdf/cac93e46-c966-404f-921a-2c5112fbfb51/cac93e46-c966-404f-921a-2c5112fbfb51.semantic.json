@@ -1,0 +1,23 @@
+{
+  "document": "cac93e46-c966-404f-921a-2c5112fbfb51.pdf",
+  "schema_version": "1.0",
+  "total_pages": 2,
+  "pages": [
+    {
+      "page": 1,
+      "text_chars": 3637,
+      "tables": 0,
+      "images": 0,
+      "method": "native"
+    },
+    {
+      "page": 2,
+      "text_chars": 2501,
+      "tables": 0,
+      "images": 0,
+      "method": "native"
+    }
+  ],
+  "tables": [],
+  "images": []
+}

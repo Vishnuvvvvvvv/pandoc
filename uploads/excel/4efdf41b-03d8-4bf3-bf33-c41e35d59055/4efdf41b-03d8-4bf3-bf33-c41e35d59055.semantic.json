@@ -1,0 +1,278 @@
+{
+  "document": "4efdf41b-03d8-4bf3-bf33-c41e35d59055.xls",
+  "schema_version": "1.0",
+  "total_sheets": 3,
+  "total_tables": 3,
+  "sheets": [
+    {
+      "name": "Example Test",
+      "rows": 7,
+      "cols": 9,
+      "empty": false,
+      "meta": {
+        "max_row": 7,
+        "max_col": 9,
+        "has_merged_cells": false
+      },
+      "data": [
+        [
+          "MC",
+          "What is 2+2?",
+          "4",
+          "correct",
+          "3",
+          "incorrect",
+          "",
+          "",
+          ""
+        ],
+        [
+          "MA",
+          "What C datatypes are 8 bits? (assume i386)",
+          "int",
+          "",
+          "float",
+          "",
+          "double",
+          "",
+          "char"
+        ],
+        [
+          "TF",
+          "Bagpipes are awesome.",
+          "true",
+          "",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        [
+          "ESS",
+          "How have the original Henry Hornbostel buildings influenced campus architecture and design in the last 30 years?",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        [
+          "ORD",
+          "Rank the following in their order of operation.",
+          "Parentheses",
+          "Exponents",
+          "Division",
+          "Addition",
+          "",
+          "",
+          ""
+        ],
+        [
+          "FIB",
+          "The student activities fee is",
+          "95",
+          "dollars for students enrolled in",
+          "19",
+          "units or more,",
+          "",
+          "",
+          ""
+        ],
+        [
+          "MAT",
+          "Match the lower-case greek letter with its capital form.",
+          "\u03bb",
+          "\u039b",
+          "\u03b1",
+          "\u03b3",
+          "\u0393",
+          "\u03c6",
+          "\u03a6"
+        ]
+      ]
+    },
+    {
+      "name": "Format Abbr.",
+      "rows": 22,
+      "cols": 2,
+      "empty": false,
+      "meta": {
+        "max_row": 22,
+        "max_col": 2,
+        "has_merged_cells": false
+      },
+      "data": [
+        [
+          "",
+          ""
+        ],
+        [
+          "",
+          ""
+        ],
+        [
+          "",
+          ""
+        ],
+        [
+          "http://www.cmu.edu/blackboard",
+          ""
+        ],
+        [
+          "",
+          ""
+        ],
+        [
+          "Question Format Abbreviations",
+          ""
+        ],
+        [
+          "",
+          ""
+        ],
+        [
+          "Abbreviation",
+          "Question Type"
+        ],
+        [
+          "MC",
+          "Multiple Choice"
+        ],
+        [
+          "MA",
+          "Multiple Answer"
+        ],
+        [
+          "TF",
+          "True/False"
+        ],
+        [
+          "ESS",
+          "Essay"
+        ],
+        [
+          "ORD",
+          "Ordering"
+        ],
+        [
+          "MAT",
+          "Matching"
+        ],
+        [
+          "FIB",
+          "Fill in the Blank"
+        ],
+        [
+          "FIL",
+          "File response"
+        ],
+        [
+          "NUM",
+          "Numeric Response"
+        ],
+        [
+          "SR",
+          "Short response"
+        ],
+        [
+          "OP",
+          "Opinion"
+        ],
+        [
+          "FIB_PLUS",
+          "Multiple Fill in the Blank"
+        ],
+        [
+          "JUMBLED_SENTENCE",
+          "Jumbled Sentence"
+        ],
+        [
+          "QUIZ_BOWL",
+          "Quiz Bowl"
+        ]
+      ]
+    },
+    {
+      "name": "Readme",
+      "rows": 22,
+      "cols": 1,
+      "empty": false,
+      "meta": {
+        "max_row": 22,
+        "max_col": 1,
+        "has_merged_cells": false
+      },
+      "data": [
+        [
+          ""
+        ],
+        [
+          ""
+        ],
+        [
+          ""
+        ],
+        [
+          "http://www.cmu.edu/blackboard"
+        ],
+        [
+          ""
+        ],
+        [
+          "File Information"
+        ],
+        [
+          ""
+        ],
+        [
+          ""
+        ],
+        [
+          "Source"
+        ],
+        [
+          "http://www.cmu.edu/blackboard/files/evaluate/tests-example.xls"
+        ],
+        [
+          ""
+        ],
+        [
+          ""
+        ],
+        [
+          "Version"
+        ],
+        [
+          "1.0 (January 2012)"
+        ],
+        [
+          ""
+        ],
+        [
+          ""
+        ],
+        [
+          "Contact"
+        ],
+        [
+          "bb-help@andrew.cmu.edu"
+        ],
+        [
+          ""
+        ],
+        [
+          ""
+        ],
+        [
+          "About"
+        ],
+        [
+          "This is an example and template for preparing Blackboard tests offline. See the full directions at: http://www.cmu.edu/blackboard/evaluate#manage_tests/import_questions"
+        ]
+      ]
+    }
+  ]
+}
