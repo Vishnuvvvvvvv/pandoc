@@ -1,12 +1,16 @@
 """
 excel_parsing.py
 ────────────────
-FastAPI router for Excel / CSV extraction:
-  - openpyxl   → .xlsx / .xlsm  (native, merged-cell aware)
-  - xlrd        → .xls           (legacy binary format)
-  - csv (stdlib)→ .csv
+FastAPI router for Excel / CSV extraction.
 
-Produces per-sheet Markdown tables + a structured semantic JSON.
+Supports two rendering modes chosen automatically per sheet:
+  • TABULAR   – plain GFM table  (classic spreadsheet data)
+  • FORM      – smart renderer   (form/report documents with merged headers,
+                                  key-value question rows, signature blocks, etc.)
+
+The renderer is chosen by inspecting the ratio of unique-value-per-row counts:
+  - If most non-empty rows have ≤ 4 distinct cell values → FORM
+  - Otherwise → TABULAR
 
 Mount in any FastAPI app:
     from excel_parsing import router as excel_router
@@ -43,7 +47,7 @@ log = logging.getLogger("excel_pipeline")
 # ── Config ─────────────────────────────────────────────────────────────────────
 OUTPUT_DIR  = Path(os.getenv("EXCEL_OUTPUT_DIR", "./uploads/excel"))
 STAGING_DIR = OUTPUT_DIR / "_staging"
-MAX_ROWS_PER_SHEET = int(os.getenv("EXCEL_MAX_ROWS", "5000"))   # safety cap
+MAX_ROWS_PER_SHEET = int(os.getenv("EXCEL_MAX_ROWS", "5000"))
 MAX_COLS_PER_SHEET = int(os.getenv("EXCEL_MAX_COLS", "200"))
 ALLOWED_EXT = {".xlsx", ".xlsm", ".xls", ".csv"}
 
@@ -65,6 +69,7 @@ class SheetSummary(BaseModel):
     rows: int
     cols: int
     empty: bool
+    renderer: str   # "tabular" | "form"
 
 class JobStatus(BaseModel):
     job_id: str
@@ -77,12 +82,11 @@ class JobStatus(BaseModel):
     semantic_json_path: Optional[str] = None
     error: Optional[str] = None
 
-# ── Router ─────────────────────────────────────────────────────────────────────
 router = APIRouter()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Helpers
+# Cell / grid helpers
 # ══════════════════════════════════════════════════════════════════════════════
 class _SafeEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -93,66 +97,333 @@ class _SafeEncoder(json.JSONEncoder):
 
 
 def _cell_str(value: Any) -> str:
-    """Safely convert any cell value to a plain string."""
     if value is None:
         return ""
     if isinstance(value, float):
-        # Drop .0 suffix for whole numbers
         return str(int(value)) if value == int(value) else str(value)
-    return str(value)
+    return str(value).strip()
 
 
-def _grid_to_markdown(grid: list[list[str]], sheet_name: str) -> str:
+def _trim_grid(grid: list[list[str]]) -> list[list[str]]:
+    """Remove fully-empty trailing rows and rightmost empty columns."""
+    while grid and all(c == "" for c in grid[-1]):
+        grid.pop()
+    if not grid:
+        return grid
+    max_col = max(
+        (max((i for i, c in enumerate(row) if c), default=-1) for row in grid),
+        default=-1,
+    )
+    return [] if max_col < 0 else [row[:max_col + 1] for row in grid]
+
+
+def _used_width(grid: list[list[str]]) -> int:
+    m = 0
+    for row in grid:
+        for i, c in enumerate(row):
+            if c:
+                m = max(m, i)
+    return m + 1
+
+
+def _unique_vals(row: list[str], used_width: int) -> list[str]:
     """
-    Convert a 2-D list of strings to a GFM table.
-    First row is treated as the header. If the sheet is empty, returns a note.
-    Pipe characters inside cells are escaped.
+    Return deduplicated non-empty cell values in left-to-right order.
+
+    When openpyxl expands merged cells via merge_map the same string is
+    repeated across every cell in the merge range.  Deduplicating recovers
+    the original distinct values and is the key step that enables form detection.
     """
-    # Strip completely empty trailing rows/cols
+    seen: list[str] = []
+    seen_set: set[str] = set()
+    for c in row[:used_width]:
+        c = c.strip()
+        if c and c not in seen_set:
+            seen.append(c)
+            seen_set.add(c)
+    return seen
+
+
+def _unique_vals_ex(row: list[str], used_width: int) -> tuple[list[str], set[str]]:
+    """
+    Like _unique_vals but also returns the set of values that appeared
+    MORE THAN ONCE in the raw row — these are merge-cell expanded values.
+
+    Used by the KV buffer so that _flush_kv_buf can distinguish:
+      • merge-repeated value (count > 1) → safe to suppress in subsequent rows
+      • genuine single-cell value (count == 1) → must NOT be suppressed even if
+        it coincidentally repeats across rows (e.g. same author in every version)
+    """
+    counts: dict[str, int] = {}
+    seen: list[str] = []
+    seen_set: set[str] = set()
+    for c in row[:used_width]:
+        c = c.strip()
+        if c:
+            counts[c] = counts.get(c, 0) + 1
+            if c not in seen_set:
+                seen.append(c)
+                seen_set.add(c)
+    merged = {v for v, n in counts.items() if n > 1}
+    return seen, merged
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Form detection
+# ══════════════════════════════════════════════════════════════════════════════
+_ROW_EMPTY  = "empty"
+_ROW_HEADER = "header"   # short full-width merged section banner  (≤ 80 chars)
+_ROW_TEXT   = "text"     # long full-width merged paragraph / body text (> 80 chars)
+_ROW_KV     = "kv"       # question + answer  (or side-by-side pairs)
+_ROW_DATA   = "data"     # genuine tabular data row
+
+
+def _classify_row(unique: list[str]) -> str:
+    """Classify a row by its UNIQUE (deduplicated) non-empty values.
+
+    n == 0        → empty
+    n == 1        → header (short banner) or text (long paragraph)
+    2 ≤ n ≤ 6    → KV  (label/value pairs, side-by-side pairs, or small grids)
+    n >= 7        → data (dense tabular row)
+
+    Using ≤ 6 as the KV threshold means consecutive KV rows get buffered and
+    flushed as a GFM table, which correctly handles signature blocks, assessment
+    grids, and actions tables regardless of individual cell lengths.
+    """
+    n = len(unique)
+    if n == 0:
+        return _ROW_EMPTY
+    if n == 1:
+        val = unique[0]
+        return _ROW_TEXT if len(val) > 80 else _ROW_HEADER
+    if n <= 6:
+        return _ROW_KV      # always KV — let the kv_buf decide table vs inline
+    return _ROW_DATA
+
+
+def _is_form_sheet(grid: list[list[str]]) -> bool:
+    """
+    Return True when the sheet looks like a form / report rather than a
+    flat data table.
+
+    Uses a CONSERVATIVE n<=4 threshold (stricter than the renderer's n<=6)
+    so that plain 5-column data tables (e.g. Version Control) are not
+    incorrectly detected as form sheets.
+    """
+    if not grid:
+        return False
+    uw = _used_width(grid)
+    form = 0
+    total = 0
+    for row in grid:
+        uv = _unique_vals(row, uw)
+        n = len(uv)
+        if n == 0:
+            continue
+        total += 1
+        if n == 1 or n <= 4:   # header/text/short-kv → form
+            form += 1
+    return total > 0 and (form / total) > 0.40
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Markdown renderers
+# ══════════════════════════════════════════════════════════════════════════════
+def _row_md(cells: list[str]) -> str:
+    escaped = [c.replace("|", "\\|").replace("\n", " ") for c in cells]
+    return "| " + " | ".join(escaped) + " |"
+
+
+def _tabular_to_markdown(grid: list[list[str]], sheet_name: str) -> str:
+    """Classic GFM table: row 0 = header, rows 1-N = data.
+
+    Before rendering, leading rows where every cell contains the same
+    repeated value (artifact of merged-cell expansion on title rows) are
+    stripped so they don't pollute the table header.
+    """
     while grid and all(c == "" for c in grid[-1]):
         grid.pop()
     if not grid:
         return f"*Sheet `{sheet_name}` is empty.*\n"
 
-    def _row_md(cells: list[str]) -> str:
-        escaped = [c.replace("|", "\\|").replace("\n", " ") for c in cells]
-        return "| " + " | ".join(escaped) + " |"
+    # Strip leading rows that are entirely one repeated value (merged title rows)
+    while len(grid) > 1:
+        ne = [c for c in grid[0] if c]
+        if ne and len(set(ne)) == 1:   # all non-empty cells are identical
+            grid.pop(0)
+        else:
+            break
+    # Also strip leading fully-blank rows
+    while len(grid) > 1 and all(c == "" for c in grid[0]):
+        grid.pop(0)
 
-    lines = [_row_md(grid[0])]
-    lines.append("| " + " | ".join(["---"] * len(grid[0])) + " |")
+    lines = [_row_md(grid[0]),
+             "| " + " | ".join(["---"] * len(grid[0])) + " |"]
     for row in grid[1:]:
-        # Pad / trim row to match header width
         padded = row[:len(grid[0])] + [""] * max(0, len(grid[0]) - len(row))
         lines.append(_row_md(padded))
     return "\n".join(lines)
 
 
-def _trim_grid(grid: list[list[str]]) -> list[list[str]]:
-    """Remove fully-empty trailing rows and columns."""
-    # Trim empty rows from the bottom
-    while grid and all(c == "" for c in grid[-1]):
-        grid.pop()
+def _flush_kv_buf(kv_buf: list[tuple[list[str], set[str]]], parts: list[str]) -> None:
+    """
+    Render buffered KV rows.
+
+    kv_buf entries are (unique_vals, merged_set) tuples where merged_set
+    contains values that appeared more than once in the raw row (merged cells).
+
+    * 1 row, 1 value  -> blockquote
+    * 1 row, 2 values -> **Label:** Value
+    * 2+ rows         -> GFM table with merge-cell column suppression
+    """
+    if not kv_buf:
+        return
+
+    uvs    = [entry[0] for entry in kv_buf]
+    merges = [entry[1] for entry in kv_buf]
+
+    if len(kv_buf) == 1:
+        uv = uvs[0]
+        if len(uv) == 1:
+            parts.append(f"> {uv[0]}")
+        elif len(uv) == 2:
+            parts.append(f"**{uv[0]}:** {uv[1]}")
+        else:
+            pairs = []
+            for i in range(0, len(uv) - 1, 2):
+                pairs.append(f"**{uv[i]}:** {uv[i+1] if i+1 < len(uv) else ''}")
+            if len(uv) % 2 == 1:
+                pairs.append(f"**{uv[-1]}:**")
+            parts.append("  ·  ".join(pairs))
+    else:
+        max_cols = max(len(r) for r in uvs)
+        rows = [r + [""] * (max_cols - len(r)) for r in uvs]
+
+        # Suppress values that repeat in the same column from one row to the next,
+        # BUT ONLY if that value was a merge-cell value in the previous row
+        # (i.e. appeared multiple times in the raw row before deduplication).
+        # This preserves genuine repeated data values like the same author name.
+        deduped = [rows[0][:]]
+        for j in range(1, len(rows)):
+            new_row = []
+            for i, val in enumerate(rows[j]):
+                prev = rows[j - 1][i] if i < len(rows[j - 1]) else ""
+                is_merge_repeat = val and val == prev and val in merges[j - 1]
+                new_row.append("" if is_merge_repeat else val)
+            deduped.append(new_row)
+
+        # If any cell was suppressed (row-span merge dedup fired), the first row
+        # contains span labels that GFM would render as bold table headers.
+        # Insert a hidden blank header so all content rows become plain data rows.
+        any_suppressed = any(
+            deduped[j][i] == "" and rows[j][i] != ""
+            for j in range(1, len(rows))
+            for i in range(max_cols)
+        )
+        if any_suppressed:
+            lines = [_row_md([""] * max_cols),
+                     "| " + " | ".join(["---"] * max_cols) + " |"]
+            for r in deduped:          # all rows become data rows
+                lines.append(_row_md(r))
+        else:
+            lines = [_row_md(deduped[0]),
+                     "| " + " | ".join(["---"] * max_cols) + " |"]
+            for r in deduped[1:]:
+                lines.append(_row_md(r))
+        parts.append("\n".join(lines))
+        parts.append("")
+
+    kv_buf.clear()
+
+
+def _form_to_markdown(grid: list[list[str]], sheet_name: str,
+                      row_span_vals: set[str] | None = None) -> str:
+    """
+    Smart renderer for form / report sheets.
+
+    Row classification (after unique-value deduplication):
+      EMPTY  → skipped
+      HEADER → Markdown heading  (## short banner / ### sub-section)
+      TEXT   → plain paragraph   (long body text)
+      KV     → buffered; flushed as **Label:** Value (single) or GFM table (multiple)
+      DATA   → buffered and flushed as a GFM table
+    """
     if not grid:
-        return grid
-    # Trim empty columns from the right
-    max_col = max(
-        (max((i for i, c in enumerate(row) if c != ""), default=-1) for row in grid),
-        default=-1,
-    )
-    if max_col < 0:
-        return []
-    return [row[:max_col + 1] for row in grid]
+        return f"*Sheet `{sheet_name}` is empty.*\n"
+
+    uw = _used_width(grid)
+    parts: list[str] = []
+    data_buf: list[list[str]] = []   # buffer for consecutive DATA rows
+    kv_buf:   list[tuple[list[str], set[str]]] = []  # (unique_vals, merged_set)
+    last_line: str = ""              # suppress duplicate merged-cell rows
+    _row_spans = row_span_vals or set()  # values from vertically-spanning merges
+
+    def _flush_data():
+        if not data_buf:
+            return
+        parts.append(_tabular_to_markdown([r[:] for r in data_buf], sheet_name))
+        parts.append("")
+        data_buf.clear()
+
+    def _flush_kv():
+        _flush_kv_buf(kv_buf, parts)
+
+    def _flush_all():
+        _flush_kv()
+        _flush_data()
+
+    header_streak = 0
+
+    for row in grid:
+        uv  = _unique_vals(row, uw)
+        cls = _classify_row(uv)
+
+        if cls == _ROW_EMPTY:
+            _flush_all()
+            header_streak = 0
+            continue
+
+        if cls == _ROW_HEADER:
+            _flush_all()
+            header_streak += 1
+            line = f"\n{'##' if header_streak == 1 else '###'} {uv[0]}\n"
+            if line != last_line:
+                parts.append(line)
+                last_line = line
+
+        elif cls == _ROW_TEXT:
+            _flush_all()
+            header_streak = 0
+            line = f"\n{uv[0]}\n"
+            if line != last_line:
+                parts.append(line)
+                last_line = line
+
+        elif cls == _ROW_KV:
+            _flush_data()          # data block ends; start/continue KV block
+            header_streak = 0
+            last_line = ""
+            uv = _unique_vals(row, uw)
+            # Only _row_spans (vertical merges) should drive cross-row dedup.
+            # h_merged (horizontal column-spans within a single row) must NOT,
+            # or coincidentally repeated values like "Date" get wrongly blanked.
+            kv_buf.append((uv, _row_spans))
+
+        else:  # _ROW_DATA
+            _flush_kv()            # KV block ends; start/continue data block
+            header_streak = 0
+            last_line = ""
+            data_buf.append([row[i] if i < len(row) else "" for i in range(uw)])
+
+    _flush_all()
+    return "\n".join(p for p in parts if p is not None)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Per-format sheet extractors
 # ══════════════════════════════════════════════════════════════════════════════
 def _extract_xlsx(file_path: Path) -> list[dict[str, Any]]:
-    """
-    Extract all sheets from .xlsx / .xlsm using openpyxl.
-    Handles merged cells by filling the top-left value across the merge range.
-    Returns list of {name, grid, meta}.
-    """
+    """Extract .xlsx/.xlsm sheets with merged-cell expansion."""
     try:
         import openpyxl
     except ImportError:
@@ -162,25 +433,33 @@ def _extract_xlsx(file_path: Path) -> list[dict[str, Any]]:
     sheets = []
 
     for ws in wb.worksheets:
-        # Expand merged cells: fill top-left value into all covered cells
+        # Build merge map: (row, col) → top-left value
         merge_map: dict[tuple[int, int], str] = {}
-        for merge_range in ws.merged_cells.ranges:
-            top_left_cell = ws.cell(merge_range.min_row, merge_range.min_col)
-            val = _cell_str(top_left_cell.value)
-            for row in range(merge_range.min_row, merge_range.max_row + 1):
-                for col in range(merge_range.min_col, merge_range.max_col + 1):
-                    merge_map[(row, col)] = val
+        for mr in ws.merged_cells.ranges:
+            val = _cell_str(ws.cell(mr.min_row, mr.min_col).value)
+            for r in range(mr.min_row, mr.max_row + 1):
+                for c in range(mr.min_col, mr.max_col + 1):
+                    merge_map[(r, c)] = val
 
         grid: list[list[str]] = []
-        for r_idx, row in enumerate(ws.iter_rows(
-            max_row=min(ws.max_row or 0, MAX_ROWS_PER_SHEET),
-            max_col=min(ws.max_column or 0, MAX_COLS_PER_SHEET),
-        )):
-            cells = []
-            for cell in row:
-                val = merge_map.get((cell.row, cell.column), _cell_str(cell.value))
-                cells.append(val)
-            grid.append(cells)
+        max_r = min(ws.max_row or 0, MAX_ROWS_PER_SHEET)
+        max_c = min(ws.max_column or 0, MAX_COLS_PER_SHEET)
+        for row in ws.iter_rows(max_row=max_r, max_col=max_c):
+            grid.append([
+                merge_map.get((cell.row, cell.column), _cell_str(cell.value))
+                for cell in row
+            ])
+
+        # Collect row_span_vals: values from merges that span multiple rows.
+        # These appear once per row in the same column, so _unique_vals_ex cannot
+        # detect them as repeated-within-row. We track them separately so the
+        # KV table renderer can suppress them after the first row.
+        row_span_vals: set[str] = set()
+        for mr in ws.merged_cells.ranges:
+            if mr.max_row > mr.min_row:          # vertically spanning merge
+                val = _cell_str(ws.cell(mr.min_row, mr.min_col).value)
+                if val:
+                    row_span_vals.add(val)
 
         grid = _trim_grid(grid)
         sheets.append({
@@ -190,6 +469,7 @@ def _extract_xlsx(file_path: Path) -> list[dict[str, Any]]:
                 "max_row": ws.max_row,
                 "max_col": ws.max_column,
                 "has_merged_cells": bool(ws.merged_cells.ranges),
+                "row_span_vals": row_span_vals,
             },
         })
 
@@ -198,7 +478,7 @@ def _extract_xlsx(file_path: Path) -> list[dict[str, Any]]:
 
 
 def _extract_xls(file_path: Path) -> list[dict[str, Any]]:
-    """Extract all sheets from legacy .xls using xlrd."""
+    """Extract legacy .xls using xlrd."""
     try:
         import xlrd
     except ImportError:
@@ -206,33 +486,30 @@ def _extract_xls(file_path: Path) -> list[dict[str, Any]]:
 
     wb = xlrd.open_workbook(str(file_path))
     sheets = []
-
-    for sheet_name in wb.sheet_names():
-        ws = wb.sheet_by_name(sheet_name)
-        grid: list[list[str]] = []
-        for r in range(min(ws.nrows, MAX_ROWS_PER_SHEET)):
-            row = [_cell_str(ws.cell_value(r, c))
-                   for c in range(min(ws.ncols, MAX_COLS_PER_SHEET))]
-            grid.append(row)
+    for name in wb.sheet_names():
+        ws = wb.sheet_by_name(name)
+        grid = [
+            [_cell_str(ws.cell_value(r, c)) for c in range(min(ws.ncols, MAX_COLS_PER_SHEET))]
+            for r in range(min(ws.nrows, MAX_ROWS_PER_SHEET))
+        ]
         grid = _trim_grid(grid)
         sheets.append({
-            "name": sheet_name,
+            "name": name,
             "grid": grid,
             "meta": {"max_row": ws.nrows, "max_col": ws.ncols, "has_merged_cells": False},
         })
-
     return sheets
 
 
 def _extract_csv(file_path: Path) -> list[dict[str, Any]]:
-    """Parse a CSV file as a single-sheet workbook."""
+    """Parse a CSV as a single-sheet workbook."""
     with open(file_path, newline="", encoding="utf-8-sig") as fh:
-        reader = csv.reader(fh)
         grid = [[_cell_str(c) for c in row]
-                for i, row in enumerate(reader) if i < MAX_ROWS_PER_SHEET]
+                for i, row in enumerate(csv.reader(fh)) if i < MAX_ROWS_PER_SHEET]
     grid = _trim_grid(grid)
     return [{"name": file_path.stem, "grid": grid,
-             "meta": {"max_row": len(grid), "max_col": len(grid[0]) if grid else 0,
+             "meta": {"max_row": len(grid),
+                      "max_col": len(grid[0]) if grid else 0,
                       "has_merged_cells": False}}]
 
 
@@ -241,13 +518,12 @@ def _extract_csv(file_path: Path) -> list[dict[str, Any]]:
 # ══════════════════════════════════════════════════════════════════════════════
 def _process_excel(file_path: Path) -> dict[str, Any]:
     suffix = file_path.suffix.lower()
-    name = file_path.stem
+    name   = file_path.stem
     out_dir = OUTPUT_DIR / name
     out_dir.mkdir(parents=True, exist_ok=True)
 
     log.info("Processing Excel: %s", file_path.name)
 
-    # ── Extract sheets ──────────────────────────────────────────────────────
     try:
         if suffix in (".xlsx", ".xlsm"):
             sheets = _extract_xlsx(file_path)
@@ -263,21 +539,29 @@ def _process_excel(file_path: Path) -> dict[str, Any]:
         log.error("Extraction failed: %s", exc)
         return {"success": False, "error": f"Extraction error: {exc}"}
 
-    # ── Build Markdown ──────────────────────────────────────────────────────
-    md_parts = [f"# {name}\n"]
-    sheet_summaries = []
+    md_parts: list[str] = [f"# {name}\n"]
+    sheet_summaries: list[dict] = []
     total_tables = 0
 
     for sheet in sheets:
-        sname = sheet["name"]
-        grid  = sheet["grid"]
-        rows  = len(grid)
-        cols  = len(grid[0]) if grid else 0
-        empty = rows == 0
+        sname  = sheet["name"]
+        grid   = sheet["grid"]
+        rows   = len(grid)
+        cols   = len(grid[0]) if grid else 0
+        empty  = rows == 0
+
+        # ── Choose renderer ──────────────────────────────────────────────────
+        is_form   = (not empty) and _is_form_sheet(grid)
+        renderer  = "form" if is_form else "tabular"
+        log.info("  Sheet '%s' → %s renderer (%d rows, %d cols)", sname, renderer, rows, cols)
 
         md_parts.append(f"\n---\n\n## Sheet: {sname}\n")
         if not empty:
-            md_parts.append(_grid_to_markdown(grid, sname))
+            if is_form:
+                row_span_vals = sheet.get("meta", {}).get("row_span_vals", set())
+                md_parts.append(_form_to_markdown(grid, sname, row_span_vals))
+            else:
+                md_parts.append(_tabular_to_markdown(grid, sname))
             total_tables += 1
         else:
             md_parts.append(f"*Sheet `{sname}` is empty.*")
@@ -287,6 +571,7 @@ def _process_excel(file_path: Path) -> dict[str, Any]:
             "rows": rows,
             "cols": cols,
             "empty": empty,
+            "renderer": renderer,
             **sheet.get("meta", {}),
         })
 
@@ -294,10 +579,9 @@ def _process_excel(file_path: Path) -> dict[str, Any]:
     md_path = out_dir / f"{name}.md"
     md_path.write_text(full_md, encoding="utf-8")
 
-    # ── Build semantic JSON ─────────────────────────────────────────────────
     semantic = {
         "document": file_path.name,
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "total_sheets": len(sheets),
         "total_tables": total_tables,
         "sheets": [
@@ -306,8 +590,9 @@ def _process_excel(file_path: Path) -> dict[str, Any]:
                 "rows": len(s["grid"]),
                 "cols": len(s["grid"][0]) if s["grid"] else 0,
                 "empty": len(s["grid"]) == 0,
+                "renderer": ("form" if _is_form_sheet(s["grid"]) else "tabular"),
                 "meta": s.get("meta", {}),
-                "data": s["grid"],          # full data for downstream use
+                "data": s["grid"],
             }
             for s in sheets
         ],
@@ -355,20 +640,15 @@ def _run_pipeline(job_id: str, file_path: Path) -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 @router.post("/upload", response_model=UploadResponse)
 async def upload_excel(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
-    """
-    Upload a .xlsx, .xlsm, .xls, or .csv file for extraction.
-    Returns a job_id to poll with GET /excel/status/{job_id}.
-    """
+    """Upload a .xlsx, .xlsm, .xls, or .csv file for extraction."""
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_EXT:
         raise HTTPException(
             status_code=400,
             detail=f"Only {', '.join(sorted(ALLOWED_EXT))} accepted. Got: '{suffix}'",
         )
-
     job_id = str(uuid.uuid4())
     tmp_path = STAGING_DIR / f"{job_id}{suffix}"
-
     try:
         with tmp_path.open("wb") as fh:
             shutil.copyfileobj(file.file, fh)
@@ -377,7 +657,6 @@ async def upload_excel(background_tasks: BackgroundTasks, file: UploadFile = Fil
 
     _jobs[job_id] = {"status": "queued", "result": None, "filename": file.filename}
     background_tasks.add_task(_executor.submit, _run_pipeline, job_id, tmp_path)
-
     return UploadResponse(
         job_id=job_id,
         status="queued",
@@ -387,17 +666,14 @@ async def upload_excel(background_tasks: BackgroundTasks, file: UploadFile = Fil
 
 @router.get("/status/{job_id}", response_model=JobStatus)
 async def get_status(job_id: str):
-    """Poll the status of an extraction job."""
+    """Poll job status."""
     job = _jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found.")
-
     result = job.get("result") or {}
     md = result.get("markdown", "")
-
     raw_sheets = result.get("sheets", [])
     sheets = [SheetSummary(**s) for s in raw_sheets] if raw_sheets else None
-
     return JobStatus(
         job_id=job_id,
         status=job["status"],
@@ -413,21 +689,16 @@ async def get_status(job_id: str):
 
 @router.get("/jobs")
 async def list_jobs():
-    """List all jobs (job_id, status, filename, sheet count)."""
     return [
-        {
-            "job_id": jid,
-            "status": j["status"],
-            "filename": j.get("filename"),
-            "sheets": len((j.get("result") or {}).get("sheets", [])),
-        }
+        {"job_id": jid, "status": j["status"],
+         "filename": j.get("filename"),
+         "sheets": len((j.get("result") or {}).get("sheets", []))}
         for jid, j in _jobs.items()
     ]
 
 
 @router.get("/download/{job_id}/markdown")
 async def download_markdown(job_id: str):
-    """Download the extracted Markdown file."""
     job = _jobs.get(job_id)
     if not job or job["status"] != "done":
         raise HTTPException(status_code=404, detail="Job not ready.")
@@ -439,7 +710,6 @@ async def download_markdown(job_id: str):
 
 @router.get("/download/{job_id}/semantic")
 async def download_semantic(job_id: str):
-    """Download the structured semantic JSON (full sheet data + metadata)."""
     job = _jobs.get(job_id)
     if not job or job["status"] != "done":
         raise HTTPException(status_code=404, detail="Job not ready.")
@@ -451,7 +721,6 @@ async def download_semantic(job_id: str):
 
 @router.delete("/jobs/{job_id}")
 async def delete_job(job_id: str):
-    """Remove a job record from memory."""
     if job_id not in _jobs:
         raise HTTPException(status_code=404, detail="Job not found.")
     _jobs.pop(job_id)

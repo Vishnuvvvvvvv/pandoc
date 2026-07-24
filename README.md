@@ -13,7 +13,8 @@ A self-contained **FastAPI** service that converts `.doc` / `.docx` files into s
 5. [Configuration](#configuration)
 6. [Running Locally](#running-locally)
 7. [Docker Deployment](#docker-deployment)
-8. [Code Audit — What Is Necessary vs Unnecessary](#code-audit)
+8. [Excel Pipeline](#excel-pipeline)
+9. [Code Audit — What Is Necessary vs Unnecessary](#code-audit)
 
 ---
 
@@ -213,7 +214,121 @@ docker run -d \
 
 ---
 
+## Excel Pipeline
+
+`excel_parsing.py` is a **self-contained FastAPI router** that extracts `.xlsx`, `.xlsm`, `.xls`, and `.csv` files into GFM Markdown tables and a structured semantic JSON.
+
+### Reusing in Another Project
+
+Only **one file** needs to be copied:
+
+```
+excel_parsing.py  →  your-other-project/excel_parsing.py
+```
+
+**1. Mount it in your `main.py` / `app.py`:**
+```python
+from excel_parsing import router as excel_router
+app.include_router(excel_router, prefix="/excel", tags=["Excel Pipeline"])
+```
+
+**2. Install dependencies:**
+```bash
+uv add openpyxl xlrd
+# or: pip install openpyxl xlrd
+```
+
+**3. Optional `.env` settings:**
+```env
+EXCEL_OUTPUT_DIR=./uploads/excel   # where outputs are saved
+EXCEL_MAX_ROWS=5000                # safety cap per sheet
+EXCEL_MAX_COLS=200
+```
+
+| What | Required? |
+|------|-----------|
+| `excel_parsing.py` | ✅ Only file needed |
+| `openpyxl` | ✅ For `.xlsx` / `.xlsm` |
+| `xlrd` | ✅ For legacy `.xls` |
+| `python-dotenv` | ✅ Already in project |
+| Any other router files | ❌ Not needed |
+
+### API Endpoints
+
+All routes are prefixed with `/excel`.
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| `POST` | `/excel/upload` | Upload `.xlsx`, `.xlsm`, `.xls`, or `.csv` |
+| `GET` | `/excel/status/{job_id}` | Poll job — returns sheet summaries + markdown preview |
+| `GET` | `/excel/jobs` | List all jobs |
+| `GET` | `/excel/download/{job_id}/markdown` | Download `.md` file |
+| `GET` | `/excel/download/{job_id}/semantic` | Download full `.semantic.json` (all sheet data) |
+| `DELETE` | `/excel/jobs/{job_id}` | Remove job record from memory |
+
+### How Extraction Works — Key Code Snippets
+
+Three functions work together to faithfully capture the entire sheet, including complex multi-row headers:
+
+**1. Merged cell expansion** — fills a merged header region with the top-left value so no cell appears blank:
+```python
+for merge_range in ws.merged_cells.ranges:
+    top_left_cell = ws.cell(merge_range.min_row, merge_range.min_col)
+    val = _cell_str(top_left_cell.value)
+    for row in range(merge_range.min_row, merge_range.max_row + 1):
+        for col in range(merge_range.min_col, merge_range.max_col + 1):
+            merge_map[(row, col)] = val   # same value stamped into every merged cell
+```
+This is why a header like "Mixte (various variants)" spanning 2 rows appears in both rows instead of only the first.
+
+**2. Raw row-by-row read** — every row, every cell, no skipping or interpretation:
+```python
+for row in ws.iter_rows(max_row=MAX_ROWS_PER_SHEET, max_col=MAX_COLS_PER_SHEET):
+    cells = []
+    for cell in row:
+        val = merge_map.get((cell.row, cell.column), _cell_str(cell.value))
+        cells.append(val)
+    grid.append(cells)   # every row lands in the grid exactly as-is
+```
+No logic here decides "is this a header or data?" — everything is collected faithfully.
+
+**3. Grid → Markdown** — `grid[0]` becomes the GFM header separator; all other rows become data rows:
+```python
+def _grid_to_markdown(grid, sheet_name):
+    lines = [_row_md(grid[0])]                    # row 0 = markdown header
+    lines.append("| --- | --- | ... |")            # GFM separator
+    for row in grid[1:]:                           # rows 1-N = data
+        lines.append(_row_md(row))
+    return "\n".join(lines)
+```
+
+For a document with a multi-row header block (e.g., an insurance policy Excel):
+```
+grid[0] → "Blue Plan | Mixte... | Double Norwich..."  → markdown header
+grid[1] → "MB000 | MB001-9 | MB012..."               → data row (sub-header)
+grid[2] → "30 | 669 | 3..."                          → data row (counts)
+grid[3] → "general answers | yes | yes..."           → data row (actual data)
+```
+All rows are preserved — nothing is interpreted or dropped.
+
+### Known Edge Case — Blank First Row
+
+If a sheet's **first row is empty** (e.g., a metadata/title sheet with content starting 5 rows down), `grid[0]` will be a row of empty cells, so the markdown header will appear blank:
+
+```markdown
+|  |  |  |           ← blank "header" from empty row 0
+| --- | --- | --- |
+|  |  |  |           ← more blank rows
+| Abbreviation | Question Type |   ← real header, now a data row
+| MC | Multiple Choice |
+```
+
+This is a known limitation of the no-heuristic approach. If you need to handle files where data always starts at a known row offset, the `EXCEL_MAX_ROWS` env var won't help — you would need a `?skip_rows=N` parameter (not yet implemented).
+
+---
+
 ## Code Audit
+
 
 ### Necessary — Core Logic
 
