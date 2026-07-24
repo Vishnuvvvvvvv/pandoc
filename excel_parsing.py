@@ -357,6 +357,7 @@ def _form_to_markdown(grid: list[list[str]], sheet_name: str,
     kv_buf:   list[tuple[list[str], set[str]]] = []  # (unique_vals, merged_set)
     last_line: str = ""              # suppress duplicate merged-cell rows
     _row_spans = row_span_vals or set()  # values from vertically-spanning merges
+    kv_deferred = False              # empty row seen while kv_buf active (may be spacer)
 
     def _flush_data():
         if not data_buf:
@@ -379,12 +380,23 @@ def _form_to_markdown(grid: list[list[str]], sheet_name: str,
         cls = _classify_row(uv)
 
         if cls == _ROW_EMPTY:
-            _flush_all()
+            _flush_data()
             header_streak = 0
+            if kv_buf:
+                # Don't flush KV immediately — empty rows in Excel are often
+                # just visual spacers between form-grid rows.  Set a flag and
+                # let the next row decide whether to continue or terminate.
+                kv_deferred = True
+            else:
+                _flush_kv()
             continue
 
         if cls == _ROW_HEADER:
-            _flush_all()
+            if kv_deferred:
+                kv_deferred = False
+                _flush_kv()         # genuine section break -> flush now
+            else:
+                _flush_all()
             header_streak += 1
             line = f"\n{'##' if header_streak == 1 else '###'} {uv[0]}\n"
             if line != last_line:
@@ -392,7 +404,11 @@ def _form_to_markdown(grid: list[list[str]], sheet_name: str,
                 last_line = line
 
         elif cls == _ROW_TEXT:
-            _flush_all()
+            if kv_deferred:
+                kv_deferred = False
+                _flush_kv()
+            else:
+                _flush_all()
             header_streak = 0
             line = f"\n{uv[0]}\n"
             if line != last_line:
@@ -400,16 +416,23 @@ def _form_to_markdown(grid: list[list[str]], sheet_name: str,
                 last_line = line
 
         elif cls == _ROW_KV:
-            _flush_data()          # data block ends; start/continue KV block
+            _flush_data()
             header_streak = 0
             last_line = ""
-            uv = _unique_vals(row, uw)
-            # Only _row_spans (vertical merges) should drive cross-row dedup.
-            # h_merged (horizontal column-spans within a single row) must NOT,
-            # or coincidentally repeated values like "Date" get wrongly blanked.
+            if kv_deferred:
+                kv_deferred = False
+                # Same column count (>=3) = empty row was just a visual spacer.
+                if kv_buf and len(uv) == len(kv_buf[-1][0]) and len(uv) >= 3:
+                    kv_buf.append((uv, _row_spans))
+                    continue
+                else:
+                    _flush_kv()   # different width -> end old block, start fresh
             kv_buf.append((uv, _row_spans))
 
         else:  # _ROW_DATA
+            if kv_deferred:
+                kv_deferred = False
+                _flush_kv()
             _flush_kv()            # KV block ends; start/continue data block
             header_streak = 0
             last_line = ""
