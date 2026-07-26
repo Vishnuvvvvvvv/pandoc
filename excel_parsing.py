@@ -99,6 +99,12 @@ class _SafeEncoder(json.JSONEncoder):
 def _cell_str(value: Any) -> str:
     if value is None:
         return ""
+    # datetime must come before date (datetime is a subclass of date)
+    import datetime as _dt
+    if isinstance(value, _dt.datetime):
+        return value.strftime("%d/%m/%Y")
+    if isinstance(value, _dt.date):
+        return value.strftime("%d/%m/%Y")
     if isinstance(value, float):
         return str(int(value)) if value == int(value) else str(value)
     return str(value).strip()
@@ -421,12 +427,15 @@ def _form_to_markdown(grid: list[list[str]], sheet_name: str,
             last_line = ""
             if kv_deferred:
                 kv_deferred = False
-                # Same column count (>=3) = empty row was just a visual spacer.
-                if kv_buf and len(uv) == len(kv_buf[-1][0]) and len(uv) >= 3:
+                # Continue buffering if column count is within ±1 of the current
+                # buffer (±1 tolerates stray notes/comments in a far-right column).
+                # No minimum column count — even 2-col table rows continue across
+                # empty spacers (e.g. Original Review Date | Amended Review Date).
+                if kv_buf and abs(len(uv) - len(kv_buf[-1][0])) <= 1:
                     kv_buf.append((uv, _row_spans))
                     continue
                 else:
-                    _flush_kv()   # different width -> end old block, start fresh
+                    _flush_kv()   # clearly different block -> flush and restart
             kv_buf.append((uv, _row_spans))
 
         else:  # _ROW_DATA

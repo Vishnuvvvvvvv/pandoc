@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Product Atlas MVP</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',sans-serif;background:#0f1117;color:#e2e8f0;min-height:100vh}
+.sidebar{width:220px;position:fixed;top:0;left:0;height:100vh;background:#161b27;border-right:1px solid #1e2a3a;padding:20px 0}
+.logo{padding:0 20px 24px;font-size:18px;font-weight:700;color:#60a5fa;border-bottom:1px solid #1e2a3a;margin-bottom:16px}
+.nav-item{padding:10px 20px;cursor:pointer;color:#94a3b8;font-size:14px;transition:.2s}
+.nav-item:hover,.nav-item.active{color:#e2e8f0;background:#1e2a3a}
+.main{margin-left:220px;padding:32px}
+h1{font-size:22px;font-weight:600;margin-bottom:6px}
+.subtitle{color:#64748b;font-size:14px;margin-bottom:28px}
+.stats{display:flex;gap:16px;margin-bottom:28px}
+.stat{background:#161b27;border:1px solid #1e2a3a;border-radius:10px;padding:16px 24px;min-width:120px}
+.stat-n{font-size:28px;font-weight:700;color:#60a5fa}
+.stat-l{font-size:12px;color:#64748b;margin-top:2px}
+table{width:100%;border-collapse:collapse;background:#161b27;border-radius:10px;overflow:hidden;border:1px solid #1e2a3a}
+th{text-align:left;padding:12px 16px;font-size:12px;color:#64748b;font-weight:600;text-transform:uppercase;border-bottom:1px solid #1e2a3a}
+td{padding:12px 16px;font-size:13px;border-bottom:1px solid #1e2a3a;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#1a2035}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:99px;font-size:12px;font-weight:600}
+.b-not_verified{background:#1e293b;color:#64748b;border:1px solid #334155}
+.b-in_progress{background:#1e3a5f;color:#60a5fa;border:1px solid #2563eb44}
+.b-verified{background:#14532d;color:#4ade80;border:1px solid #16a34a44;cursor:pointer;transition:.15s}
+.b-verified:hover{background:#166534;box-shadow:0 0 0 2px #16a34a55}
+.btn{padding:6px 14px;border-radius:7px;border:none;cursor:pointer;font-size:12px;font-weight:600;transition:.2s}
+.btn-primary{background:#2563eb;color:#fff}.btn-primary:hover{background:#1d4ed8}
+.btn-ghost{background:#1e2a3a;color:#94a3b8}.btn-ghost:hover{background:#243046;color:#e2e8f0}
+.btn-green{background:#065f46;color:#34d399}.btn-green:hover{background:#047857}
+.btn-red{background:#450a0a;color:#f87171}
+.btn-sm{padding:4px 10px;font-size:11px}
+.tag{font-size:11px;background:#1e2a3a;color:#64748b;padding:2px 8px;border-radius:4px}
+/* Viewer */
+#viewer{display:none}
+.viewer-header{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.viewer-header h2{font-size:18px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tabs{display:flex;gap:4px;background:#161b27;border-radius:8px;padding:4px;border:1px solid #1e2a3a}
+.tab{padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;color:#64748b;transition:.2s}
+.tab.active{background:#2563eb;color:#fff}
+.meta-bar{background:#161b27;border:1px solid #1e2a3a;border-radius:8px;padding:12px 16px;margin-bottom:20px;display:flex;gap:24px;flex-wrap:wrap;font-size:13px}
+.meta-item{color:#64748b}.meta-item b{color:#e2e8f0;font-weight:500}
+.md-preview{background:#161b27;border:1px solid #1e2a3a;border-radius:10px;padding:28px 36px;line-height:1.8;font-size:15px;min-height:400px}
+.md-preview h1,.md-preview h2,.md-preview h3{color:#f1f5f9;margin:1.2em 0 .5em}
+.md-preview h1{font-size:22px;border-bottom:1px solid #1e2a3a;padding-bottom:8px}
+.md-preview h2{font-size:18px}.md-preview p{margin:.6em 0;color:#cbd5e1}
+.md-preview table{width:100%;margin:1em 0}
+.md-preview th,.md-preview td{padding:8px 12px;border:1px solid #1e2a3a;font-size:13px}
+.md-preview th{background:#1e2a3a;color:#e2e8f0;font-weight:600}.md-preview td{color:#cbd5e1}
+.md-preview strong{color:#f1f5f9}
+/* Edit mode */
+.edit-bar{background:#1a2035;border:1px solid #2563eb;border-radius:8px;padding:10px 16px;display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.edit-bar span{flex:1;font-size:13px;color:#60a5fa}
+.split{display:flex;gap:12px;height:68vh}
+.split textarea{flex:1;background:#0d1117;border:1px solid #1e2a3a;border-radius:8px;padding:16px;color:#e2e8f0;font-family:'Courier New',monospace;font-size:13px;line-height:1.6;resize:none;outline:none}
+.split textarea:focus{border-color:#2563eb}
+.split .preview-pane{flex:1;overflow-y:auto}
+/* Modals */
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center}
+.overlay.open{display:flex}
+.modal{background:#161b27;border:1px solid #1e2a3a;border-radius:14px;padding:28px;width:440px;max-width:95vw}
+.modal h3{font-size:16px;font-weight:600;margin-bottom:18px}
+.modal-row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #1e2a3a;font-size:14px}
+.modal-row:last-child{border-bottom:none}
+.modal-row .lbl{color:#64748b}
+.modal-row .val{color:#e2e8f0;font-weight:500;text-align:right;max-width:60%}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
+.modal textarea{width:100%;background:#0d1117;border:1px solid #1e2a3a;border-radius:8px;padding:10px;color:#e2e8f0;font-size:13px;height:80px;resize:none;outline:none;margin-bottom:16px}
+#toast{position:fixed;bottom:24px;right:24px;background:#1e3a5f;color:#60a5fa;border:1px solid #2563eb;border-radius:8px;padding:12px 20px;font-size:13px;transform:translateY(80px);transition:.3s;z-index:200}
+#toast.show{transform:translateY(0)}
+.ver-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px}
+.dot-green{background:#4ade80}.dot-blue{background:#60a5fa}.dot-gray{background:#475569}
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="logo">🗂 Product Atlas</div>
+  <div class="nav-item active" onclick="showPage('browse')">📄 Browse</div>
+  <div class="nav-item" onclick="showPage('history')">🕒 History</div>
+</div>
+
+<div class="main">
+  <!-- LIST PAGE -->
+  <div id="listPage">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <h1 id="pageTitle">Documents</h1>
+      <button class="btn btn-ghost" onclick="seed()">🌱 Seed Demo Data</button>
+    </div>
+    <p class="subtitle" id="pageSubtitle">Browse and extract documents</p>
+    <div class="stats">
+      <div class="stat"><div class="stat-n" id="sTotal">0</div><div class="stat-l">Total</div></div>
+      <div class="stat"><div class="stat-n" id="sExtracted" style="color:#34d399">0</div><div class="stat-l">Extracted</div></div>
+      <div class="stat"><div class="stat-n" id="sInProgress" style="color:#60a5fa">0</div><div class="stat-l">In Progress</div></div>
+      <div class="stat"><div class="stat-n" id="sVerified" style="color:#4ade80">0</div><div class="stat-l">Verified</div></div>
+    </div>
+    <table>
+      <thead><tr>
+        <th>Document</th>
+        <th>Folder Path</th>
+        <th>Processed</th>
+        <th style="min-width:160px">Verification Status</th>
+        <th>Signed Off By</th>
+        <th>Actions</th>
+      </tr></thead>
+      <tbody id="docTable"><tr><td colspan="6" style="text-align:center;color:#64748b;padding:32px">No documents — click Seed Demo Data</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- VIEWER / EDITOR PAGE -->
+  <div id="viewer">
+    <div class="viewer-header">
+      <button class="btn btn-ghost" onclick="backToList()">← Back</button>
+      <h2 id="vFileName"></h2>
+      <div id="vVerBadge"></div>
+      <div class="tabs">
+        <div class="tab active" id="tabOrig" onclick="switchTab('raw')">Original MD</div>
+        <div class="tab" id="tabCurr" onclick="switchTab('current')">Current Version</div>
+      </div>
+      <button class="btn btn-primary" id="btnEdit" onclick="startEdit()">✏️ Edit</button>
+    </div>
+    <div class="meta-bar">
+      <div class="meta-item">📁 <b id="vPath"></b></div>
+      <div class="meta-item">📅 Processed: <b id="vProcessed"></b></div>
+      <div class="meta-item">💾 Last Saved: <b id="vLastSaved"></b></div>
+      <div class="meta-item">✅ Verified By: <b id="vVerBy"></b></div>
+    </div>
+    <!-- View -->
+    <div id="viewMode">
+      <div class="md-preview" id="mdPreview"></div>
+    </div>
+    <!-- Edit -->
+    <div id="editMode" style="display:none">
+      <div class="edit-bar">
+        <span>✏️ Editing as <b id="editUser">editor@company.com</b> · <span id="saveStatus">Unsaved</span></span>
+        <button class="btn btn-ghost btn-sm" onclick="discardEdit()">Discard</button>
+        <button class="btn btn-primary btn-sm" onclick="saveDraft()">💾 Save</button>
+        <button class="btn btn-green btn-sm" onclick="openVerifyModal()">✅ Verify & Sign Off</button>
+      </div>
+      <div class="split">
+        <textarea id="mdEditor" oninput="livePreview()"></textarea>
+        <div class="preview-pane md-preview" id="editPreview"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- VERIFICATION DETAIL POPUP -->
+<div class="overlay" id="verPopup">
+  <div class="modal" style="width:400px">
+    <h3>🔍 Verification Details</h3>
+    <div id="verPopupBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeAll()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- SIGN OFF MODAL -->
+<div class="overlay" id="verifyModal">
+  <div class="modal">
+    <h3>✅ Verify & Sign Off</h3>
+    <p style="font-size:13px;color:#94a3b8;margin-bottom:16px">
+      Signing off: <b id="verifyDocName" style="color:#e2e8f0"></b><br>
+      The current draft will become the verified final MD.
+    </p>
+    <textarea id="verifyNotes" placeholder="Notes (optional)..."></textarea>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeAll()">Cancel</button>
+      <button class="btn btn-green" onclick="confirmVerify()">Confirm ✅</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const API = '';
+let currentDoc = null;
+let currentTab = 'raw';
+let currentUser = 'editor@company.com';
+let autoTimer   = null;
+
+// ── Helpers ───────────────────────────────────────────────────────
+function toast(msg, c='#60a5fa') {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.style.color = c;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2500);
+}
+function fmtDate(s) {
+  if (!s) return '—';
+  try { return new Date(s+'Z').toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
+  catch { return s; }
+}
+function closeAll() {
+  document.querySelectorAll('.overlay').forEach(e=>e.classList.remove('open'));
+}
+
+function verBadge(status, docId) {
+  if (status === 'verified')
+    return `<span class="badge b-verified" onclick="showVerPopup('${docId}')" title="Click for details">
+              <span class="ver-dot dot-green"></span>Verified
+            </span>`;
+  if (status === 'in_progress')
+    return `<span class="badge b-in_progress"><span class="ver-dot dot-blue"></span>In Progress</span>`;
+  return `<span class="badge b-not_verified"><span class="ver-dot dot-gray"></span>Not Verified</span>`;
+}
+
+// ── Seed ─────────────────────────────────────────────────────────
+async function seed() {
+  const r = await fetch(API+'/api/seed',{method:'POST'});
+  const d = await r.json();
+  if (d.total > 0) toast(`Seeded ${d.total} documents ✅`,'#34d399');
+  else toast('All documents already exist','#94a3b8');
+  loadDocs();
+}
+
+// ── Load list ─────────────────────────────────────────────────────
+async function loadDocs() {
+  const res  = await fetch(API+'/api/documents');
+  const docs = await res.json();
+  document.getElementById('sTotal').textContent     = docs.length;
+  document.getElementById('sExtracted').textContent = docs.filter(d=>d.status==='extracted').length;
+  document.getElementById('sInProgress').textContent= docs.filter(d=>d.verification_status==='in_progress').length;
+  document.getElementById('sVerified').textContent  = docs.filter(d=>d.verification_status==='verified').length;
+
+  const tbody = document.getElementById('docTable');
+  if (!docs.length) {
+    tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:#64748b;padding:32px">No documents — click Seed Demo Data</td></tr>';
+    return;
+  }
+  tbody.innerHTML = docs.map(d=>`
+    <tr>
+      <td><span class="tag">${d.file_type||'?'}</span> <b style="margin-left:6px">${d.original_filename}</b></td>
+      <td style="color:#64748b;font-size:12px">${d.sharepoint_path||'—'}</td>
+      <td style="color:#94a3b8;font-size:12px">${fmtDate(d.processed_at)}</td>
+      <td>${verBadge(d.verification_status, d.id)}</td>
+      <td style="font-size:12px;color:${d.verified_by?'#4ade80':'#475569'}">${d.verified_by||'—'}</td>
+      <td style="display:flex;gap:6px;flex-wrap:wrap">
+        ${d.status==='extracted'?`<button class="btn btn-primary btn-sm" onclick="openViewer('${d.id}')">View .md</button>`:''}
+        <button class="btn btn-ghost btn-sm">${d.status==='extracted'?'Reprocess':'Extract'}</button>
+      </td>
+    </tr>`).join('');
+}
+
+// ── Verification popup ────────────────────────────────────────────
+async function showVerPopup(docId) {
+  const res  = await fetch(API+`/api/documents/${docId}/verification`);
+  const data = await res.json();
+  const rows = [
+    ['Status',           verBadge(data.verification_status, docId)],
+    ['Verified By',      `<b style="color:#4ade80">${data.verified_by||'—'}</b>`],
+    ['Verified At',      fmtDate(data.verified_at)],
+    ['SharePoint Upload',fmtDate(data.sp_upload_date)],
+    ['Last Edited By',   data.edited_by||'—'],
+    ['Notes',            data.notes||'—'],
+  ];
+  document.getElementById('verPopupBody').innerHTML =
+    rows.map(([l,v])=>`<div class="modal-row"><span class="lbl">${l}</span><span class="val">${v}</span></div>`).join('');
+  document.getElementById('verPopup').classList.add('open');
+}
+
+// ── Open viewer ───────────────────────────────────────────────────
+async function openViewer(docId) {
+  const res = await fetch(API+'/api/documents/'+docId);
+  currentDoc = await res.json();
+  const proc = currentDoc.processing || {};
+
+  document.getElementById('listPage').style.display='none';
+  document.getElementById('viewer').style.display='block';
+  document.getElementById('vFileName').textContent  = currentDoc.original_filename;
+  document.getElementById('vPath').textContent      = currentDoc.sharepoint_path||'—';
+  document.getElementById('vProcessed').textContent = fmtDate(currentDoc.processed_at);
+  document.getElementById('vLastSaved').textContent = fmtDate(proc.last_saved_at);
+  document.getElementById('vVerBy').textContent     = currentDoc.verified_by||'—';
+  document.getElementById('vVerBadge').innerHTML    = verBadge(currentDoc.verification_status, docId);
+  document.getElementById('verifyDocName').textContent = currentDoc.original_filename;
+  document.getElementById('btnEdit').style.display  = currentDoc.verification_status==='in_progress' ? 'none' : '';
+
+  currentTab = 'raw';
+  document.getElementById('tabOrig').classList.add('active');
+  document.getElementById('tabCurr').classList.remove('active');
+  showViewMode();
+  await loadContent('raw');
+}
+
+async function loadContent(tab) {
+  try {
+    const res = await fetch(API+`/api/documents/${currentDoc.id}/content?version=${tab}`);
+    if (!res.ok) { document.getElementById('mdPreview').innerHTML='<i style="color:#64748b">No content for this version.</i>'; return; }
+    const d = await res.json();
+    document.getElementById('mdPreview').innerHTML = marked.parse(d.content||'');
+  } catch { document.getElementById('mdPreview').innerHTML='<i style="color:#64748b">Could not load.</i>'; }
+}
+
+async function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('tabOrig').classList.toggle('active', tab==='raw');
+  document.getElementById('tabCurr').classList.toggle('active', tab==='current');
+  if (document.getElementById('editMode').style.display!=='none') return;
+  await loadContent(tab);
+}
+
+function showViewMode() {
+  document.getElementById('viewMode').style.display='';
+  document.getElementById('editMode').style.display='none';
+}
+
+// ── Edit ─────────────────────────────────────────────────────────
+async function startEdit() {
+  await fetch(API+`/api/documents/${currentDoc.id}/edit/start`,{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({user:currentUser})});
+  const res = await fetch(API+`/api/documents/${currentDoc.id}/content?version=draft`);
+  const d   = await res.json();
+  document.getElementById('mdEditor').value = d.content||'';
+  livePreview();
+  document.getElementById('viewMode').style.display='none';
+  document.getElementById('editMode').style.display='';
+  document.getElementById('btnEdit').style.display='none';
+  document.getElementById('saveStatus').textContent='Unsaved';
+  startAutoSave();
+  toast('Edit session started','#60a5fa');
+}
+
+function livePreview() {
+  document.getElementById('editPreview').innerHTML = marked.parse(document.getElementById('mdEditor').value||'');
+  document.getElementById('saveStatus').textContent='Unsaved changes';
+}
+
+function startAutoSave() {
+  if (autoTimer) clearInterval(autoTimer);
+  autoTimer = setInterval(()=>saveDraft(true), 60000);
+}
+
+async function saveDraft(auto=false) {
+  const content = document.getElementById('mdEditor').value;
+  await fetch(API+`/api/documents/${currentDoc.id}/edit/save`,{
+    method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({content, user:currentUser})});
+  document.getElementById('saveStatus').textContent='Saved '+new Date().toLocaleTimeString();
+  if (!auto) toast('Draft saved 💾','#34d399');
+}
+
+async function discardEdit() {
+  if (!confirm('Discard all changes?')) return;
+  clearInterval(autoTimer);
+  await fetch(API+`/api/documents/${currentDoc.id}/edit/discard`,{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({user:currentUser})});
+  await openViewer(currentDoc.id);
+  toast('Changes discarded','#f87171');
+}
+
+// ── Verify ───────────────────────────────────────────────────────
+function openVerifyModal() { document.getElementById('verifyModal').classList.add('open'); }
+
+async function confirmVerify() {
+  await saveDraft(true);
+  const notes = document.getElementById('verifyNotes').value;
+  const res   = await fetch(API+`/api/documents/${currentDoc.id}/verify`,{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({user:currentUser, notes})});
+  const d = await res.json();
+  clearInterval(autoTimer);
+  closeAll();
+  toast('Document Verified ✅','#4ade80');
+  await openViewer(currentDoc.id);
+}
+
+function backToList() {
+  document.getElementById('viewer').style.display='none';
+  document.getElementById('listPage').style.display='';
+  showViewMode();
+  loadDocs();
+}
+
+function showPage(page) {
+  document.querySelectorAll('.nav-item').forEach((el,i)=>
+    el.classList.toggle('active',(i===0&&page==='browse')||(i===1&&page==='history')));
+  document.getElementById('pageTitle').textContent    = page==='browse'?'Documents':'Processing History';
+  document.getElementById('pageSubtitle').textContent = page==='browse'
+    ?'Browse and extract documents from SharePoint'
+    :'All processed documents — verification and sign-off history';
+  loadDocs();
+}
+
+loadDocs();
+</script>
+</body>
+</html>

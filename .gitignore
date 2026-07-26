@@ -32,3 +32,11 @@ sampel.md
 .DS_Store
 Thumbs.db
 *.swp
+
+# ── Atlas MVP local runtime files ─────────────────────────────────────────────
+atlas_mvp.db           # SQLite DB (local dev only)
+mock_sharepoint/       # local mock of SharePoint folders
+~$*.xlsx               # Excel temp lock files
+atlas-react/node_modules/
+atlas-react/dist/
+test-docs/~$vfm_assessment_complex.xlsx

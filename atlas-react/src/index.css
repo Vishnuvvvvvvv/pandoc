@@ -1,0 +1,25 @@
+/* Global reset + dark theme tokens */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: #0f1117;
+  color: #e2e8f0;
+  min-height: 100vh;
+}
+
+/* Markdown preview styles */
+.md-content { line-height: 1.8; font-size: 15px; }
+.md-content h1 { font-size: 22px; border-bottom: 1px solid #1e2a3a; padding-bottom: 8px; margin: 1.2em 0 .5em; color: #f1f5f9; }
+.md-content h2 { font-size: 18px; margin: 1.2em 0 .5em; color: #f1f5f9; }
+.md-content h3 { font-size: 15px; margin: 1em 0 .4em; color: #f1f5f9; }
+.md-content p  { margin: .6em 0; color: #cbd5e1; }
+.md-content strong { color: #f1f5f9; }
+.md-content table { width: 100%; border-collapse: collapse; margin: 1em 0; }
+.md-content th, .md-content td { padding: 8px 12px; border: 1px solid #1e2a3a; font-size: 13px; }
+.md-content th { background: #1e2a3a; color: #e2e8f0; font-weight: 600; }
+.md-content td { color: #cbd5e1; }
+.md-content ul, .md-content ol { padding-left: 24px; color: #cbd5e1; margin: .5em 0; }
+.md-content blockquote { border-left: 3px solid #2563eb; padding-left: 16px; color: #94a3b8; margin: 1em 0; }
+.md-content code { background: #1e2a3a; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+.md-content pre  { background: #0d1117; border: 1px solid #1e2a3a; border-radius: 8px; padding: 16px; overflow-x: auto; margin: 1em 0; }
