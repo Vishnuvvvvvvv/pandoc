@@ -2,6 +2,11 @@
 # Paste this entire prompt into Copilot Chat on your company laptop
 # ═══════════════════════════════════════════════════════════════════
 
+
+markdown+grid_tables-raw_html
+
+
+
 I am building a React + FastAPI project called "Product Atlas" that browses SharePoint files via Microsoft Graph API and extracts Markdown from PDF/DOCX/XLSX. The extraction pipeline is already working. 
 
 I need your help to implement the next phase: a secure, 3-stage Document Lifecycle Management pipeline.

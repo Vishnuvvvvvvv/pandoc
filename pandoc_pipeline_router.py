@@ -436,7 +436,8 @@ def _process_document(docx_path: Path) -> dict[str, Any]:
     try:
         base_md = pypandoc.convert_file(
             str(use_path),
-            'gfm',
+            # 'gfm',
+            'markdown+grid_tables-raw_html',
             extra_args=['--wrap=none']
         )
         # Strip empty HTML comments Pandoc injects between loose lists
