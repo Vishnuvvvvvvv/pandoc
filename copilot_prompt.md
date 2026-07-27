@@ -3,9 +3,26 @@
 # ═══════════════════════════════════════════════════════════════════
 
 
+
+=======================================================================================================================
+
+=======================================================================================================================
+
 markdown+grid_tables-raw_html
 
+say im editing a  file which is  already signed and verfiied, then the copy on ediiting is getting stored somehere right , and  as the edititng is in progress and not verified yet the final verifiied document prev generated is still there , and now, when after clciking the view md file, on the current version tab , when i click , i am seeing teh old version/ the final document veriifed previously, but then the currently editing document is not beign able to see in the current verison tab. only afetr i clcik the edit button and go inside , then only im abel to see the edited version document getting laoded.
 
+
+"When a previously verified document is being re-edited (status is 'In Progress'), opening the document in View Mode shows the old 'Final' version under the Current Version tab. It completely hides the active draft. The user has to click 'Edit' to actually see the draft they are working on. The Current Version tab should always prioritize showing the active draft if one exists."
+
+
+
+
+also only when we clcik the edit button , then onyl the signed and verified button is getting vivsible, shouldnt it be visible once we clcik on to the view md ? 
+
+
+
+=======================================================================================================================
 
 I am building a React + FastAPI project called "Product Atlas" that browses SharePoint files via Microsoft Graph API and extracts Markdown from PDF/DOCX/XLSX. The extraction pipeline is already working. 
 
