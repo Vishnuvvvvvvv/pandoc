@@ -12,6 +12,7 @@ USAGE in your existing main.py:
 
 from __future__ import annotations
 
+import html as _html_lib
 import io
 import json
 import logging
@@ -32,6 +33,11 @@ from fastapi.responses import FileResponse
 from PIL import Image
 from pydantic import BaseModel
 import pypandoc
+try:
+    from bs4 import BeautifulSoup as _BS
+    _BS4_AVAILABLE = True
+except ImportError:
+    _BS4_AVAILABLE = False
 
 load_dotenv()
 
@@ -419,6 +425,166 @@ def _preprocess_list_nesting(docx_path: Path) -> Path:
         return docx_path
 
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# HTML TABLE → MARKDOWN POST-PROCESSOR
+# ══════════════════════════════════════════════════════════════════════════════
+def _convert_html_tables(md: str) -> str:
+    """
+    Replaces every HTML <table> block inside a Markdown string with a clean
+    GFM pipe table so the final .md file contains zero HTML tags.
+
+    Rules:
+    - A row whose single cell spans ALL columns  → emitted as **bold title** above the table.
+    - A row with partial colspan cells            → each group's label is repeated across its
+                                                    columns in the header row.
+    - rowspan cells                               → value repeated in every covered row.
+    - Multi-paragraph cells (<p>...</p>)          → paragraphs joined with " / ".
+    """
+    if not _BS4_AVAILABLE:
+        log.warning("beautifulsoup4 not installed — HTML tables kept as-is.")
+        return md
+
+    TABLE_RE = re.compile(r'<table[\s\S]*?</table>', re.IGNORECASE)
+
+    def _cell_text(cell) -> str:
+        paras = cell.find_all('p')
+        if paras:
+            parts = [p.get_text(separator=' ', strip=True) for p in paras if p.get_text(strip=True)]
+            text = ' / '.join(parts)
+        else:
+            text = cell.get_text(separator=' ', strip=True)
+        return text.replace('|', '\\|').replace('\n', ' ').strip()
+
+    def _table_to_md(table_html: str) -> str:
+        try:
+            soup = _BS(table_html, 'html.parser')
+            table = soup.find('table')
+            if not table:
+                return table_html
+
+            all_rows = table.find_all('tr')
+            if not all_rows:
+                return table_html
+
+            # Determine true column count
+            max_cols = 0
+            for row in all_rows:
+                cols = sum(int(c.get('colspan', 1)) for c in row.find_all(['th', 'td']))
+                max_cols = max(max_cols, cols)
+            if max_cols == 0:
+                return table_html
+
+            grid: list[list] = []
+            rowspan_carry: dict[int, tuple] = {}
+            prefix_lines: list[str] = []
+
+            for row in all_rows:
+                cells = row.find_all(['th', 'td'])
+
+                # Materialise carried rowspan values
+                grid_row: list = [''] * max_cols
+                for c, (val, left) in list(rowspan_carry.items()):
+                    grid_row[c] = val
+                    if left <= 1:
+                        del rowspan_carry[c]
+                    else:
+                        rowspan_carry[c] = (val, left - 1)
+
+                # Check for full-width title row
+                if len(cells) == 1 and int(cells[0].get('colspan', 1)) == max_cols:
+                    title = _cell_text(cells[0])
+                    if title:
+                        prefix_lines.append(f"\n**{title}**")
+                    continue
+
+                col = 0
+                for cell in cells:
+                    while col < max_cols and grid_row[col] != '':
+                        col += 1
+                    if col >= max_cols:
+                        break
+                    colspan = int(cell.get('colspan', 1))
+                    rowspan = int(cell.get('rowspan', 1))
+                    text = _cell_text(cell)
+                    for i in range(min(colspan, max_cols - col)):
+                        slot = text if i == 0 else f"({text})"
+                        grid_row[col + i] = slot
+                        if rowspan > 1:
+                            rowspan_carry[col + i] = (slot, rowspan - 1)
+                    col += colspan
+
+                grid.append(grid_row)
+
+            if not grid:
+                return '\n'.join(prefix_lines)
+
+            for r in grid:
+                while len(r) < max_cols:
+                    r.append('')
+
+            def _pipe(cells: list) -> str:
+                return '| ' + ' | '.join(str(c) for c in cells) + ' |'
+
+            lines = list(prefix_lines)
+            lines.append(_pipe(grid[0]))
+            lines.append('| ' + ' | '.join(['---'] * max_cols) + ' |')
+            for r in grid[1:]:
+                lines.append(_pipe(r))
+
+            return '\n'.join(lines) + '\n'
+
+        except Exception as exc:
+            log.warning("HTML→MD table conversion failed: %s — keeping raw HTML", exc)
+            return table_html
+
+    return TABLE_RE.sub(lambda m: _table_to_md(m.group(0)), md)
+
+
+def _strip_remaining_html(md: str) -> str:
+    """
+    Second-pass cleaner: removes ALL remaining HTML tags from a Markdown string
+    after _convert_html_tables() has already handled <table> blocks.
+
+    - <br> / <br/>          → newline character
+    - <!-- comment -->       → removed
+    - <u>text</u>            → text  (underline becomes plain)
+    - <span>text</span>      → text
+    - <p>text</p>            → text
+    - Any other tag          → stripped, inner text kept
+    - &nbsp; &amp; etc.      → decoded to plain Unicode
+    - [text]{.underline} etc.→ text  (Pandoc native span syntax)
+    Code fences (```...```) are left completely untouched.
+    """
+    # Split on fenced code blocks so we never touch code content
+    FENCE_RE = re.compile(r'(```[\s\S]*?```|`[^`\n]+`)', re.MULTILINE)
+    segments = FENCE_RE.split(md)
+
+    result = []
+    for i, seg in enumerate(segments):
+        if i % 2 == 1:          # odd = code block — leave unchanged
+            result.append(seg)
+            continue
+
+        s = seg
+        # 1. <br> / <br/> → newline
+        s = re.sub(r'<br\s*/?>', '\n', s, flags=re.IGNORECASE)
+        # 2. Remove HTML comments
+        s = re.sub(r'<!--[\s\S]*?-->', '', s)
+        # 3. Strip ALL remaining HTML tags (keep inner text)
+        s = re.sub(r'<[^>]+>', '', s)
+        # 4. Decode HTML entities (&nbsp; → space, &amp; → & etc.)
+        s = _html_lib.unescape(s)
+        # 5. Pandoc span syntax: [text]{.classname} → text
+        s = re.sub(r'\[([^\]]+)\]\{[^}]+\}', r'\1', s)
+        # 6. Collapse excessive blank lines (3+ → 2)
+        s = re.sub(r'\n{3,}', '\n\n', s)
+
+        result.append(s)
+
+    return ''.join(result)
+
+
 def _process_document(docx_path: Path) -> dict[str, Any]:
     name = docx_path.stem
     out_dir = OUTPUT_DIR / name
@@ -436,8 +602,7 @@ def _process_document(docx_path: Path) -> dict[str, Any]:
     try:
         base_md = pypandoc.convert_file(
             str(use_path),
-            # 'gfm',
-            'markdown+grid_tables-raw_html',
+            'gfm',
             extra_args=['--wrap=none']
         )
         # Strip empty HTML comments Pandoc injects between loose lists
@@ -446,6 +611,10 @@ def _process_document(docx_path: Path) -> dict[str, Any]:
         base_md = re.sub(r'>\n{2,}<', '>\n<', base_md)
         # Unescape dollar signs (breaks table rendering in some viewers)
         base_md = base_md.replace(r'\$', '$')
+        # ── Convert any remaining HTML <table> blocks to clean pipe tables ──
+        base_md = _convert_html_tables(base_md)
+        # ── Strip every other remaining HTML tag (p, span, u, br, entities) ──
+        base_md = _strip_remaining_html(base_md)
     except Exception as exc:
         log.error("Pandoc markdown extraction failed: %s", exc)
         return {"success": False, "document": docx_path.name, "error": f"Pandoc error: {exc}"}
