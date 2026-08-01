@@ -1,27 +1,16 @@
 import sys, re
 sys.path.insert(0, '.')
-from pandoc_pipeline_router import _convert_html_tables, _strip_remaining_html
+from md_html_cleaner import clean_markdown
 
 with open('uploads/497bae26-6db7-4ce2-868c-545af0d36694/497bae26-6db7-4ce2-868c-545af0d36694.md', encoding='utf-8') as f:
     md = f.read()
 
-# Run both passes
-md = _convert_html_tables(md)
-md = _strip_remaining_html(md)
+result = clean_markdown(md)
 
 with open('test-docs/final_clean_output.md', 'w', encoding='utf-8') as f:
-    f.write(md)
+    f.write(result)
 
-# Count any remaining HTML-like things
-html_tags    = re.findall(r'<[a-zA-Z/][^>]*>', md)
-html_entities = re.findall(r'&[a-zA-Z]+;', md)
-pandoc_spans = re.findall(r'\{[.#][^}]+\}', md)
-
-print(f"Remaining HTML tags:     {len(html_tags)}")
-print(f"Remaining HTML entities: {len(html_entities)}")
-print(f"Remaining Pandoc spans:  {len(pandoc_spans)}")
-print(f"Total lines:             {len(md.splitlines())}")
-print()
-print("=== FULL OUTPUT ===")
-# Write to stdout safely
-sys.stdout.buffer.write(md.encode('utf-8', errors='replace'))
+remaining = len(re.findall(r'<[a-zA-Z/][^>]*>', result))
+sys.stdout.buffer.write(f"HTML tags remaining: {remaining}\n".encode())
+sys.stdout.buffer.write(f"Lines: {len(result.splitlines())}\n\n".encode())
+sys.stdout.buffer.write(result.encode('utf-8', errors='replace'))

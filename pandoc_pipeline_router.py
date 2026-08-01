@@ -21,6 +21,8 @@ import re
 import shutil
 import uuid
 import zipfile
+
+from markdownify import markdownify as _to_md
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
@@ -598,23 +600,25 @@ def _process_document(docx_path: Path) -> dict[str, Any]:
     fixed_path = _preprocess_list_nesting(docx_path)
     use_path = fixed_path  # may be same as docx_path if nothing was modified
 
-    # 1. Generate Markdown using Pandoc
+    # 1. Generate Markdown: DOCX → Pandoc HTML → markdownify → clean MD
+    # This is the cleanest pipeline: Pandoc outputs valid HTML (no mixed content),
+    # then markdownify converts all tags in one pass with no custom logic needed.
     try:
-        base_md = pypandoc.convert_file(
+        raw_html = pypandoc.convert_file(
             str(use_path),
-            'gfm',
+            'html',
             extra_args=['--wrap=none']
         )
-        # Strip empty HTML comments Pandoc injects between loose lists
-        base_md = re.sub(r'(\r?\n)*<!-- -->(\r?\n)*', r'\n', base_md)
-        # Compress double newlines inside HTML blocks so tables render
-        base_md = re.sub(r'>\n{2,}<', '>\n<', base_md)
-        # Unescape dollar signs (breaks table rendering in some viewers)
+        base_md = _to_md(
+            raw_html,
+            heading_style='ATX',
+            bullets='-',
+            strong_em_symbol='*',
+        )
+        # Unescape dollar signs (some viewers break on \$)
         base_md = base_md.replace(r'\$', '$')
-        # ── Convert any remaining HTML <table> blocks to clean pipe tables ──
-        base_md = _convert_html_tables(base_md)
-        # ── Strip every other remaining HTML tag (p, span, u, br, entities) ──
-        base_md = _strip_remaining_html(base_md)
+        # Collapse 3+ blank lines to 2
+        base_md = re.sub(r'\n{3,}', '\n\n', base_md)
     except Exception as exc:
         log.error("Pandoc markdown extraction failed: %s", exc)
         return {"success": False, "document": docx_path.name, "error": f"Pandoc error: {exc}"}
