@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Scope of Review Test</title></head>
+<body>
+
+<h1>Document Review Report</h1>
+<p>This document contains a complex outer table with a bold title row and a nested table inside one of its cells.</p>
+
+<!-- Outer table: first row is a bold title, second row has a nested table -->
+<table>
+  <tbody>
+    <tr>
+      <td><strong>SCOPE OF REVIEW</strong></td>
+    </tr>
+    <tr>
+      <td>
+        <p>The following areas were reviewed as part of the annual audit:</p>
+        <!-- Nested table inside the outer table cell -->
+        <table>
+          <thead>
+            <tr>
+              <th>Area</th>
+              <th>Status</th>
+              <th>Risk Level</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Financial Controls</td>
+              <td><strong>Compliant</strong></td>
+              <td>Low</td>
+            </tr>
+            <tr>
+              <td>Data Security</td>
+              <td><em>Partially Compliant</em></td>
+              <td>Medium</td>
+            </tr>
+            <tr>
+              <td>Regulatory Adherence</td>
+              <td><strong>Non-Compliant</strong></td>
+              <td>High</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>All findings are documented in Appendix B.</p>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Additional Simple Table</h2>
+<p>This table has no nesting — should become a clean pipe table.</p>
+<table>
+  <thead>
+    <tr><th>Quarter</th><th>Revenue</th><th>Profit</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Q1</td><td>£1.2M</td><td>£340K</td></tr>
+    <tr><td>Q2</td><td>£1.5M</td><td>£420K</td></tr>
+    <tr><td>Q3</td><td>£1.1M</td><td>£290K</td></tr>
+  </tbody>
+</table>
+
+<h2>Rowspan Table</h2>
+<p>This table has rowspans — should be expanded by our preprocessor.</p>
+<table>
+  <thead>
+    <tr><th>Department</th><th>Team Lead</th><th>Member</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td rowspan="3">Engineering</td>
+      <td rowspan="3"><strong>Sarah Chen</strong></td>
+      <td>Alice</td>
+    </tr>
+    <tr><td>Bob</td></tr>
+    <tr><td>Carol</td></tr>
+    <tr>
+      <td rowspan="2">Marketing</td>
+      <td rowspan="2"><em>Dave Wilson</em></td>
+      <td>Eve</td>
+    </tr>
+    <tr><td>Frank</td></tr>
+  </tbody>
+</table>
+
+</body>
+</html>
