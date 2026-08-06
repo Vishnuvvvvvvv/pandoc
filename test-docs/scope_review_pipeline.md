@@ -20,30 +20,6 @@ Nested table inside the outer table cell
 
 All findings are documented in Appendix B.
 
-Area
-
-Status
-
-Risk Level
-
-Financial Controls
-
-### Compliant
-
-Low
-
-Data Security
-
-Partially Compliant
-
-Medium
-
-Regulatory Adherence
-
-### Non-Compliant
-
-High
-
 ## Additional Simple Table
 
 This table has no nesting — should become a clean pipe table.
